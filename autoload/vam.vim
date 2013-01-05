@@ -98,7 +98,7 @@ if s:c.create_addon_info_handlers
       \ setlocal ft=addon-info
       \ | setlocal syntax=json
       \ | syn match Error "^\s*'"
-    autocmd BufWritePost *-addon-info.txt,addon-info.json call vam#ReadAddonInfo(expand('%', 1))
+    autocmd BufWritePost *-addon-info.txt,addon-info.json call vam#ReadJSON(expand('%', 1))
   augroup END
 endif
 
@@ -117,7 +117,7 @@ endfun
 
 " use join so that you can break the dict into multiple lines. This makes
 " reading it much easier
-fun! vam#ReadAddonInfo(path)
+fun! vam#ReadJSON(path)
   if !filereadable(a:path)
     return {}
   endif
@@ -127,7 +127,7 @@ fun! vam#ReadAddonInfo(path)
   " versions with strange settings
 
   " using eval is evil!
-  let body = join(readfile(a:path),"")
+  let body = join(readfile(a:path), "")
 
   if vam#VerifyIsJSON(body)
     let true=1
@@ -136,7 +136,7 @@ fun! vam#ReadAddonInfo(path)
     " using eval is now safe!
     return eval(body)
   else
-    call vam#Log( "Invalid JSON in ".a:path."!")
+    call vam#Log("Invalid JSON in ".a:path."!")
     return {}
   endif
 
@@ -177,7 +177,7 @@ endfun
 fun! vam#AddonInfo(name)
   throw "deprecated"
   " use this code instead:
-  " vam#ReadAddonInfo(vam#AddonInfoFile(vam#PluginDirFromName(name), name))
+  " vam#ReadJSON(vam#AddonInfoFile(vam#PluginDirFromName(name), name))
 endfun
 
 
@@ -213,7 +213,7 @@ fun! vam#ActivateRecursively(list_of_scripts, ...)
         " don't readd rtp
         continue
       endif
-      let info = vam#ReadAddonInfo(vam#AddonInfoFile(rtp, ""))
+      let info = vam#ReadJSON(vam#AddonInfoFile(rtp, ""))
       call vam#ActivateDependencies(opts, get(info, 'dependencies', {}), name)
 
       let s:c.activated_plugins['rtp:'.rtp] = 1
@@ -233,7 +233,7 @@ fun! vam#ActivateRecursively(list_of_scripts, ...)
           continue
         endif
       endif
-      let info = vam#ReadAddonInfo(infoFile)
+      let info = vam#ReadJSON(infoFile)
       call vam#ActivateDependencies(opts, get(info, 'dependencies', {}), name)
 
       let s:c.activated_plugins[name] = 1
@@ -743,7 +743,7 @@ command! -nargs=* -complete=customlist,vam#bisect#BisectCompletion VAMBisect :ca
 
 fun! s:RunInstallHooks(plugins)
   for name in a:plugins
-    call vam#install#RunHook('post-install', vam#ReadAddonInfo(vam#AddonInfoFile(vam#PluginDirFromName(name), name)), vam#install#GetRepo(name, {}), vam#PluginDirFromName(name), {})
+    call vam#install#RunHook('post-install', vam#ReadJSON(vam#AddonInfoFile(vam#PluginDirFromName(name), name)), vam#install#GetRepo(name, {}), vam#PluginDirFromName(name), {})
   endfor
 endfun
 command! -nargs=+ -complete=customlist,vam#install#InstalledAddonCompletion RunInstallHooks :call s:RunInstallHooks([<f-args>])
