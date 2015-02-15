@@ -325,7 +325,7 @@ fun! vam#HandleRuntimepaths(opts)
   " don't miss the after directories if they exist and
   " put them last! (Thanks to Oliver Teuliere)
   let new_runtime_paths=a:opts.new_runtime_paths
-  let rtp = split(&runtimepath, '\v(\\@<!(\\.)*\\)@<!\,')
+  let rtp = vam#GetSplitRTP()
   let escapeComma = 'escape(v:val, '','')'
   let after = filter(map(copy(new_runtime_paths), 'v:val."/after"'), 'isdirectory(v:val)')
   if !s:c.dont_source
@@ -644,6 +644,10 @@ fun! vam#normpath(path)
   return substitute(expand(fnameescape(resolve(a:path)), 1), s:resep, s:sesep, 'g')
 endfun
 
+fun! vam#GetSplitRTP()
+  return split(&runtimepath, '\v(\\@<!(\\.)*\\)@<!\,')
+endfun
+
 " hack: Vim sources plugin files after sourcing .vimrc
 "       Vim doesn't source the after/plugin/*.vim files in other runtime
 "       paths. So do this *after* plugin/* files have been sourced
@@ -655,7 +659,7 @@ endfun
 fun! vam#SourceMissingPlugins()
   " files which should have been sourced:
   let fs = []
-  let rtp = split(&runtimepath, '\v(\\@<!(\\.)*\\)@<!\,')
+  let rtp = vam#GetSplitRTP()
   for r in rtp | call extend(fs, vam#GlobInDir(r, 'plugin/**/*.vim')) | endfor
   call map(fs, 'vam#normpath(v:val)')
 
