@@ -52,14 +52,38 @@ fun! vam#autoloading#Setup()
     let toautoload = filter(copy(new_runtime_paths), 'rtstatus[v:key] == 2')
     let toscan = filter(copy(new_runtime_paths), '!rtstatus[v:key]')
 
-    if !empty(toautoload) && !exists('*s:map')
-      let s:loaded_files = {}
-
+    if !exists('s:did_add_rtps')
+      let s:did_add_rtps=0
       fun! s:AddRuntimePaths(rtps, afters)
         let &rtp = join(map(copy(a:rtps), 'escape(v:val, "\\,")')
               \        +(empty(&rtp) ? [] : [&rtp])
               \        +map(copy(a:afters), 'escape(v:val, "\\,")'), ',')
       endfun
+      fun! s:RemoveRuntimePaths(...)
+        let rtps_dict={}
+        call map(copy(a:000), 'map(copy(v:val), "extend(rtps_dict, {escape(v:val, ''\\,''): 1})")')
+        let &rtp=join(filter(vam#GetSplitRTP(), '!has_key(rtps_dict, v:val)'), ',')
+      endfun
+      fun! s:WithRTPs()
+        if s:did_add_rtps || !has('vim_starting')
+          return
+        endif
+        call s:AddRuntimePaths(s:omittedrtps, s:omittedafters)
+        let s:did_add_rtps=1
+      endfun
+      fun! s:WithoutRTPs()
+        if s:did_add_rtps
+          if !has('vim_starting')
+            throw 'Internal error: s:did_add_rtps while not starting'
+          endif
+          call s:RemoveRuntimePaths(s:omittedrtps, s:omittedafters)
+          let s:did_add_rtps=0
+        endif
+      endfun
+    endif
+
+    if !empty(toautoload) && !exists('*s:map')
+      let s:loaded_files = {}
 
       fun! s:SourceFile(file)
         let s:loaded_files[a:file] = 1
@@ -73,17 +97,7 @@ fun! vam#autoloading#Setup()
             unlet s:events[key]
           endfor
         augroup END
-        if has('vim_starting')
-          let saved_rtp = &rtp
-          call s:AddRuntimePaths(s:omittedrtps, s:omittedafters)
-        endif
-        try
-          execute 'source' fnameescape(a:file)
-        finally
-          if exists('saved_rtp')
-            let &rtp = saved_rtp
-          endif
-        endtry
+        execute 'source' fnameescape(a:file)
       endfun
 
       fun! s:AddFileCmd(file, cmd)
@@ -120,12 +134,17 @@ fun! vam#autoloading#Setup()
       endfunction
 
       fun! AutoloadingMapRun(lhs, mode, abb, file)
-        call s:SourceFile(a:file)
-        let mapdescr=maparg(a:lhs, a:mode, a:abb, 1)
-        if !empty(mapdescr)
-          call s:genTempMap(mapdescr, a:mode)
-          return "\<Plug>VAMAutoloadingTempMap"
-        endif
+        call s:WithRTPs()
+        try
+          call s:SourceFile(a:file)
+          let mapdescr=maparg(a:lhs, a:mode, a:abb, 1)
+          if !empty(mapdescr)
+            call s:genTempMap(mapdescr, a:mode)
+            return "\<Plug>VAMAutoloadingTempMap"
+          endif
+        finally
+          call s:WithoutRTPs()
+        endtry
       endfun
 
       fun! s:abb(lhs, file, mode)
@@ -136,8 +155,13 @@ fun! vam#autoloading#Setup()
       endfun
 
       fun! AutoloadingCmdRun(cmd, bang, range, args, file)
-        call s:SourceFile(a:file)
-        execute a:range.a:cmd.a:bang a:args
+        call s:WithRTPs()
+        try
+          call s:SourceFile(a:file)
+          execute a:range.a:cmd.a:bang a:args
+        finally
+          call s:WithRTPs()
+        endtry
       endfun
 
       let s:compcmds = {}
@@ -146,26 +170,31 @@ fun! vam#autoloading#Setup()
 
       fun! s:comp(ccid, a, l, p)
         let cmddescr = s:compcmds[a:ccid]
-        call s:SourceFile(cmddescr.file)
-        if s:recursing
-          return []
-        endif
-        let d = {}
-        let s:recursing += 1
-
+        call s:WithRTPs()
         try
-          execute 'silent normal! :'.a:l[:(a:p))]."\<C-a>\<C-\>eextend(d, {'cmdline':getcmdline()}).cmdline\n"
-        catch
+          call s:SourceFile(cmddescr.file)
+          if s:recursing
+            return []
+          endif
           let d = {}
-        finally
-          let s:recursing -= 1
-        endtry
+          let s:recursing += 1
 
-        if has_key(d, 'cmdline')
-          return split(d.cmdline[(a:p-len(a:a)):], '\\\@<! ')
-        else
-          return []
-        endif
+          try
+            execute 'silent normal! :'.a:l[:(a:p))]."\<C-a>\<C-\>eextend(d, {'cmdline':getcmdline()}).cmdline\n"
+          catch
+            let d = {}
+          finally
+            let s:recursing -= 1
+          endtry
+
+          if has_key(d, 'cmdline')
+            return split(d.cmdline[(a:p-len(a:a)):], '\\\@<! ')
+          else
+            return []
+          endif
+        finally
+          call s:WithoutRTPs()
+        endtry
       endfun
 
       fun! s:defcompl(cmd, cmddescr)
@@ -205,12 +234,17 @@ fun! vam#autoloading#Setup()
       endfun
 
       fun! AutoloadingAueRun(key)
-        for file in keys(remove(s:events, a:key))
-          call s:SourceFile(file)
-        endfor
-        augroup VAMAutoloadingAueRun
-          execute 'autocmd!' substitute(a:key, '#', ' ', '')
-        augroup END
+        call s:WithRTPs()
+        try
+          for file in keys(remove(s:events, a:key))
+            call s:SourceFile(file)
+          endfor
+          augroup VAMAutoloadingAueRun
+            execute 'autocmd!' substitute(a:key, '#', ' ', '')
+          augroup END
+        finally
+          call s:WithoutRTPs()
+        endtry
       endfun
 
       let s:events={}
@@ -237,10 +271,7 @@ fun! vam#autoloading#Setup()
         if !has_key(s:ftfiles[a:type], a:ft)
           return
         endif
-        if has('vim_starting')
-          let saved_rtp = &rtp
-          call s:AddRuntimePaths(s:omittedrtps, s:omittedafters)
-        endif
+        call s:WithRTPs()
         try
           for [rtp, files] in s:ftfiles[a:type][a:ft]
             for file in s:db.plugins[rtp].files.plugin
@@ -253,9 +284,7 @@ fun! vam#autoloading#Setup()
             endfor
           endfor
         finally
-          if exists('saved_rtp')
-            let &rtp = saved_rtp
-          endif
+          call s:WithoutRTPs()
         endtry
       endfun
 
@@ -577,10 +606,7 @@ fun! vam#autoloading#Setup()
           return
         endif
         let fname = fnamemodify(tr(a:func, '#', '/'), ':h') . '.vim'
-        if !empty(s:omittedrtps)
-          let saved_rtp = &rtp
-          call s:AddRuntimePaths(s:omittedrtps, s:omittedafters)
-        endif
+        call s:WithRTPs()
         try
           for path in filter(map(s:omittedrtps + s:omittedafters, 'v:val."/autoload/".fname'), 'filereadable(v:val)')
             execute 'source' fnameescape(path)
@@ -589,9 +615,7 @@ fun! vam#autoloading#Setup()
             endif
           endfor
         finally
-          if exists('saved_rtp')
-            let &rtp = saved_rtp
-          endif
+          call s:WithoutRTPs()
         endtry
       endfun
 
