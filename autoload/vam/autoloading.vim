@@ -48,9 +48,17 @@ fun! vam#autoloading#Setup()
       let s:ftfiles = {'syntax': {}, 'filetype': {}}
     endif
 
-    let rtstatus = map(copy(new_runtime_paths), 'has_key(db.plugins, v:val) + !empty(get(db.plugins, v:val))')
-    let toautoload = filter(copy(new_runtime_paths), 'rtstatus[v:key] == 2')
-    let toscan = filter(copy(new_runtime_paths), '!rtstatus[v:key]')
+    let toautoload=[]
+    let toscan=[]
+    let justuse=[]
+    let proceed=[]
+    call map(copy(new_runtime_paths), '
+          \has_key(db.plugins, v:val)
+          \?(db.plugins[v:val].noautoload
+          \  ?(!empty(add(justuse, v:val)) && empty(add(proceed, v:val)))
+          \  :add(toautoload, v:val))
+          \:(!empty(add(toscan, v:val)) && empty(add(proceed, v:val)))
+          \')
 
     if !exists('s:did_add_rtps')
       let s:did_add_rtps=0
@@ -338,7 +346,7 @@ fun! vam#autoloading#Setup()
       call map(vam#GlobInDir(rtp, '{,after/}plugin/**/*.vim'), 'extend(toscanfiles, {vam#normpath(v:val) : rtp})')
       if empty(toscanfiles)
         " No plugin files, do not bother with autoloading then
-        let db.plugins[rtp] = 0
+        let db.plugins[rtp] = {'noautoload': 1}
         let s:needs_write = 1
         continue
       endif
@@ -347,7 +355,8 @@ fun! vam#autoloading#Setup()
       let dbitem = {'ftplugins': {}, 'syntaxes': {}, 'indents': {},
             \       'mappings': {}, 'commands': {}, 'functions': {}, 'abbreviations': {},
             \       'autocommands': {}, 'ftdetects': [],
-            \       'files': {'plugin': keys(toscanfiles), 'ftplugin': [], 'syntax': [], 'indent': []}}
+            \       'files': {'plugin': keys(toscanfiles), 'ftplugin': [], 'syntax': [], 'indent': []},
+            \       'noautoload': 0}
 
       for file in vam#GlobInDir(rtp, '{,after/}ftplugin/{*/,}*.vim')
         let filetype=substitute(file, '.*ftplugin/\v([^/_]+%(%(_[^/]*)?\.vim$|\/[^/]+$)@=).*', '\1', 'g')
@@ -544,6 +553,9 @@ fun! vam#autoloading#Setup()
           for [key, aprops] in items(filter(copy(newstate.autocommands), '!has_key(oldstate.autocommands, v:key)'))
             let dbitem.autocommands[key]=extend({'file': file}, aprops)
           endfor
+          if key[-10:] is# '  VimEnter'
+            let dbitem.noautoload=1
+          endif
         endif
 
         if has('vim_starting')
@@ -633,7 +645,7 @@ fun! vam#autoloading#Setup()
       endif
     endif
 
-    return call(s:old_handle_runtimepaths, [extend({'new_runtime_paths': filter(copy(new_runtime_paths), 'rtstatus[v:key] < 2')}, a:opts, 'keep')], {})
+    return call(s:old_handle_runtimepaths, [extend({'new_runtime_paths': proceed}, a:opts, 'keep')], {})
   endfun
 
   fun! AutoloadingInvalidateHook(info, repository, pluginDir, hook_opts)
