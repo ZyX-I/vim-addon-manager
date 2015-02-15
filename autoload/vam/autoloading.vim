@@ -456,6 +456,11 @@ fun! vam#autoloading#Setup()
       endfor
     endif
 
+    if dbitem.noautoload
+      call filter(dbitem, 'v:key is# "noautoload"')
+      call filter(s:toscanfiles, 'v:val isnot# rtp')
+    endif
+
     if has('vim_starting')
       let s:needs_write = 1
     else
